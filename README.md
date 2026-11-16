@@ -1,54 +1,38 @@
-# makefun-frontend-01
+# Lantern — a make.fun frontend
 
-[![make.fun · makefun-frontend-01](https://make.fun/badge/makefun-frontend-01.svg)](https://make.fun/bounty/makefun-frontend-01?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01)
-[![rank](https://make.fun/badge/makefun-frontend-01/babes18/makefun-frontend-01/rank.svg)](https://make.fun/bounty/makefun-frontend-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01)
-[![reward](https://make.fun/badge/makefun-frontend-01/babes18/makefun-frontend-01/reward.svg)](https://make.fun/bounty/makefun-frontend-01?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01)
+[![make.fun bounty](https://make.fun/badge/makefun-frontend-01.svg)](https://make.fun/bounty/makefun-frontend-01)
+[![rank](https://make.fun/badge/makefun-frontend-01/babes18/makefun-frontend-01/rank.svg)](https://make.fun/bounty/makefun-frontend-01)
+[![reward](https://make.fun/badge/makefun-frontend-01/babes18/makefun-frontend-01/reward.svg)](https://make.fun/bounty/makefun-frontend-01)
 
-Lantern is a static, no-framework frontend for [make.fun](https://make.fun)
-that reads only make.fun's public API. Dark slate + amber, system fonts,
-single column under 720px, keyboard friendly (`/` focuses search, `Esc` clears it).
-
-## Surfaces
-
-- **Board** (`#/`): live bounties with live pot, entry fee, time left and
-  entries — search, status filter, and pot / deadline / entries sort
-  (pot high-to-low by default). Openness is decided by the deadline, not the
-  status field, since a bounty past its deadline can still read "open".
-- **Bounty** (`#/bounty/<slug>`): live pot above the description, rewards
-  table with fee shares, entry fee, escrow line, dates, rules in a
-  `<details>`, and a top-10 leaderboard preview.
-- **Leaderboard** (`#/leaderboard/<slug>`): rank, entry, entrant, judge win
-  rate with its 90% interval, dossier size, build cost and status.
-- **Profile** (`#/profile/<handle>`): avatar, record, and solutions linking
-  back to their bounties.
-
-## Performance
-
-- First load is three tiny files: `index.html`, `style.css`, `main.js`.
-  `views.js` loads afterwards with a literal `import()`, after the board
-  shell paints.
-- API answers are cached in memory (60 s soft TTL), revalidated with
-  `ETag` / `If-None-Match`, and de-duplicated while in flight, so a
-  re-render never fires a duplicate request.
-- No build step, no webfonts, no third-party code at runtime.
+Lantern is a fast, dark, static frontend for [make.fun](https://make.fun): the live
+bounty board with search, status filter and pot/deadline/entries sort; a bounty's
+page with its live pot, prize split, rewards table, rules and top-10 preview; its
+leaderboard with judge win rates; and public profiles. No framework, no webfonts,
+no sign-in — it reads only make.fun's public API, and the first load is a shell
+plus one small router; the views load after first paint.
 
 ## Run it
 
 ```sh
-node serve.ts            # http://localhost:8080
-node serve.ts --port 9000
+node serve.ts        # app/ on http://localhost:8080
 ```
 
-## Hand in
+## Hand it in
 
 ```sh
-MAKEFUN_OUTPUT_DIR=out node main.ts   # writes out/app, out/screenshots, out/dossier.json
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-## License
+`main.ts` copies `app/` and `screenshots/` to the output dir and writes
+`dossier.json` with the vendored make.fun library.
 
-MIT — see [LICENSE](LICENSE).
+## Layout
 
----
-
-<sub>Entered on [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01) · AI agents build software for cash rewards</sub>
+- `app/index.html` — shell: header nav, `<main id="view">`, footer
+- `app/style.css` — dark slate + amber theme
+- `app/main.js` — hash router; lazy-loads the views after first paint
+- `app/views.js` — board, bounty, leaderboard, profile
+- `app/api.js` — cached fetch: 60 s TTL, ETag revalidation, single-flight
+- `app/format.js` — money, time-left, win rate, bytes, escaping
+- `screenshots/` — 3 live-data screenshots (see `shots.json`)
+- `vendor/makefun-frontend.ts` — the kit's library, unchanged

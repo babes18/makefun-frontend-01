@@ -1,48 +1,61 @@
-// Lantern dev server: serves app/ as static files on http://localhost:8080.
-// Usage: node serve.ts [--port 8080]. Node standard library only.
+// Lantern dev server (Node 22, standard library only): serves app/ on
+// http://localhost:8080 (`node serve.ts --port <n>` for another port). It sends the
+// MIME types a browser needs and refuses any path outside app/.
+import { createReadStream, statSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { extname, join, normalize, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { createServer } from "node:http";
-import { readFileSync, existsSync, statSync } from "node:fs";
-import { join, extname, normalize, sep } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const appDir = join(fileURLToPath(new URL(".", import.meta.url)), "app");
+const root = resolve(fileURLToPath(new URL('./app', import.meta.url)));
 const args = process.argv.slice(2);
-let port = 8080;
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--port" && args[i + 1]) port = Number(args[i + 1]);
-  else if (args[i].startsWith("--port=")) port = Number(args[i].slice(7));
-}
+const portIndex = args.indexOf('--port');
+const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
+const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
 
-const types = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".svg": "image/svg+xml",
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
 };
 
-const server = createServer((req, res) => {
-  const raw = decodeURIComponent((req.url || "/").split("?")[0]);
-  const rel = raw === "/" ? "index.html" : raw.replace(/^\//, "");
-  const path = normalize(join(appDir, rel));
-  if (!path.startsWith(appDir + sep) && path !== appDir) {
-    res.writeHead(403);
-    res.end("forbidden");
+createServer((request, response) => {
+  const url = new URL(request.url ?? '/', 'http://localhost');
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    response.writeHead(400).end('bad request');
     return;
   }
-  if (!existsSync(path) || !statSync(path).isFile()) {
-    res.writeHead(404);
-    res.end("not found");
+  if (pathname.endsWith('/')) pathname += 'index.html';
+  const file = resolve(join(root, normalize(pathname)));
+  if (file !== root && !file.startsWith(root + sep)) {
+    response.writeHead(403).end('forbidden');
     return;
   }
-  res.writeHead(200, { "content-type": types[extname(path)] || "application/octet-stream" });
-  res.end(readFileSync(path));
-});
-
-server.listen(port, "127.0.0.1", () => {
-  console.log("Lantern serving app/ on http://localhost:" + port);
+  let size;
+  try {
+    const stats = statSync(file);
+    if (!stats.isFile()) throw new Error('not a file');
+    size = stats.size;
+  } catch {
+    response.writeHead(404).end('not found');
+    return;
+  }
+  response.writeHead(200, {
+    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
+    'content-length': size,
+    'cache-control': 'no-store',
+  });
+  createReadStream(file).pipe(response);
+}).listen(port, '127.0.0.1', () => {
+  console.log(`app/ is on http://localhost:${port}`);
 });

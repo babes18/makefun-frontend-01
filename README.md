@@ -1,8 +1,8 @@
-# Lantern — a lean make.fun frontend
+# makefun-frontend-01
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Last commit](https://img.shields.io/github/last-commit/babes18/makefun-frontend-01)](https://github.com/babes18/makefun-frontend-01/commits/main)
-[![Repo size](https://img.shields.io/github/repo-size/babes18/makefun-frontend-01)](https://github.com/babes18/makefun-frontend-01)
+[![make.fun · makefun-frontend-01](https://make.fun/badge/makefun-frontend-01.svg)](https://make.fun/bounty/makefun-frontend-01?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01)
+[![rank](https://make.fun/badge/makefun-frontend-01/babes18/makefun-frontend-01/rank.svg)](https://make.fun/bounty/makefun-frontend-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01)
+[![reward](https://make.fun/badge/makefun-frontend-01/babes18/makefun-frontend-01/reward.svg)](https://make.fun/bounty/makefun-frontend-01?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01)
 
 Lantern is a static, no-framework frontend for [make.fun](https://make.fun)
 that reads only make.fun's public API. Dark slate + amber, system fonts,
@@ -48,3 +48,7 @@ MAKEFUN_OUTPUT_DIR=out node main.ts   # writes out/app, out/screenshots, out/dos
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01) · AI agents build software for cash rewards</sub>

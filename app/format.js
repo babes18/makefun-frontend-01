@@ -1,90 +1,54 @@
-// Small pure formatters shared by every view. No network, no DOM.
-
-export function moneyUsd(value) {
+// Small helpers for showing API values.
+/** Text made safe to put inside HTML. */
+export function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+/** A dollar amount ('1000.00' or 0.5) as '$1,000' or '$0.50'. */
+export function money(value) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
-  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: Number.isInteger(n) ? 0 : 2 });
 }
-
-export function moneyShort(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
-  if (n >= 1000) return "$" + (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + "k";
-  return moneyUsd(n);
+/** A deadline as a date in UTC. */
+export function date(iso) {
+  return `${new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC`;
 }
-
-export function timeLeft(deadline) {
-  const end = new Date(deadline).getTime();
-  if (!Number.isFinite(end)) return "—";
-  const ms = end - Date.now();
-  if (ms <= 0) return "closed";
-  const s = Math.floor(ms / 1000);
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return d + "d " + h + "h left";
-  if (h > 0) return h + "h " + m + "m left";
-  return m + "m left";
+/** The time until a deadline: '2d 4h left', '35m left', or 'ended'. */
+export function timeLeft(iso) {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return 'ended';
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (d > 0) return `${d}d ${h}h left`;
+  if (h > 0) return `${h}h ${m}m left`;
+  return `${m}m left`;
 }
-
-export function relativeTime(iso) {
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "—";
-  const diff = Date.now() - t;
-  const s = Math.floor(diff / 1000);
-  if (s < 60) return "just now";
+/** A past time as '5m ago', '3h ago', '2d ago'. */
+export function rel(iso) {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
-  if (m < 60) return m + "m ago";
+  if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return h + "h ago";
-  const d = Math.floor(h / 24);
-  if (d < 30) return d + "d ago";
-  return new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
-
-export function dateShort(iso) {
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "—";
-  return new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-}
-
+/** A judge win rate in micro units (950587) as '95.1%'. */
 export function winRate(micro) {
-  const n = Number(micro);
-  if (!Number.isFinite(n)) return "—";
-  return (n / 10000).toFixed(2) + "%";
+  return `${(Number(micro) / 10000).toFixed(1)}%`;
 }
-
-export function winInterval(lowMicro, highMicro) {
-  return winRate(lowMicro) + " – " + winRate(highMicro);
-}
-
+/** A byte count as '660,778 B', '12.4 KiB' or '1.23 MiB'. */
 export function bytes(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return "—";
-  if (v >= 1048576) return (v / 1048576).toFixed(1) + " MB";
-  if (v >= 1024) return (v / 1024).toFixed(1) + " KB";
-  return v + " B";
+  n = Number(n);
+  if (n < 1024) return `${n.toLocaleString('en-US')} B`;
+  if (n < 1048576) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / 1048576).toFixed(2)} MiB`;
 }
-
-export function buildCost(microUsd) {
-  const n = Number(microUsd);
-  if (!Number.isFinite(n)) return "—";
-  return "$" + (n / 1000000).toFixed(2);
+/** A build cost in micro USD as '$7.81'. */
+export function cost(microUsd) {
+  return money(Number(microUsd) / 1000000);
 }
-
-export function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
+/** The right word for a count: plural(1, 'entry', 'entries') is 'entry'. */
 export function plural(n, one, many) {
-  return Number(n) === 1 ? one : many;
-}
-
-export function countLabel(n, one, many) {
-  return Number(n).toLocaleString("en-US") + " " + plural(n, one, many);
+  return n === 1 ? one : many;
 }

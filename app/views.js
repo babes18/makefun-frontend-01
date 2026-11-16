@@ -1,243 +1,178 @@
-// The four surfaces: board, bounty, leaderboard, profile.
-// All data comes from make.fun's public API via api.js; all text is escaped.
+// Lantern views: board, bounty, leaderboard, profile — all on live make.fun data.
+import { getBounties, getBounty, getLeaderboard, getProfile } from './api.js';
+import { esc, money, date, timeLeft, rel, winRate, bytes, cost, plural } from './format.js';
 
-import { apiGet, markFetched, boardUrl, bountyUrl, leaderboardUrl, profileUrl } from "./api.js";
-import {
-  moneyUsd, moneyShort, timeLeft, relativeTime, dateShort,
-  winRate, winInterval, bytes, buildCost, escapeHtml, countLabel,
-} from "./format.js";
+let boardItems = [];
+let boardQ = '';
+let boardFilter = 'all';
+let boardSort = 'pot';
 
-function isOpen(b) {
-  if (!b || !b.deadline) return false;
-  if (b.acceptingSubmissions === false) return false;
-  return new Date(b.deadline).getTime() > Date.now();
+function isOpen(b) { return new Date(b.deadline).getTime() > Date.now(); }
+function closingSoon(b) {
+  const ms = new Date(b.deadline).getTime() - Date.now();
+  return ms > 0 && ms < 86400000;
 }
-
-function potOf(b) {
-  const v = Number(b.potUsd ?? b.rewardAmount);
-  return Number.isFinite(v) ? v : 0;
-}
-
-function feeOf(b) {
-  const v = Number(b.entryFeeUsd);
-  return Number.isFinite(v) && v > 0 ? moneyUsd(v) : "Free";
-}
-
-function bountyCard(b) {
-  const open = isOpen(b);
-  return (
-    '<article class="card">' +
-    '<h2><a href="#/bounty/' + encodeURIComponent(b.slug) + '">' + escapeHtml(b.title) + "</a></h2>" +
-    '<div class="row"><span class="pot">' + moneyUsd(potOf(b)) + ' pot</span>' +
-    '<span>' + escapeHtml(feeOf(b)) + " entry</span>" +
-    '<span>' + escapeHtml(timeLeft(b.deadline)) + "</span>" +
-    '<span>' + countLabel(b.submissionCount || 0, "entry", "entries") + "</span>" +
-    '<span class="pill ' + (open ? "open" : "closed") + '">' + (open ? "Open" : "Closed") + "</span></div>" +
-    (b.summary ? '<p class="muted">' + escapeHtml(b.summary) + "</p>" : "") +
-    '<p class="small"><a href="#/leaderboard/' + encodeURIComponent(b.slug) + '">Leaderboard</a> · ' +
-    escapeHtml(b.category || "") + "</p>" +
-    "</article>"
-  );
-}
-
-async function fetchBoard() {
-  const all = [];
-  let path = boardUrl();
-  for (let page = 0; page < 4 && path; page++) {
-    const { data } = await apiGet(path);
-    if (Array.isArray(data.items)) all.push(...data.items);
-    path = data.next_cursor ? boardUrl() + "?cursor=" + encodeURIComponent(data.next_cursor) : null;
+function shown() {
+  let list = boardItems.filter((b) => {
+    if (boardFilter === 'open') return isOpen(b);
+    if (boardFilter === 'soon') return closingSoon(b);
+    if (boardFilter === 'ended') return !isOpen(b);
+    return true;
+  });
+  if (boardQ) {
+    const q = boardQ.toLowerCase();
+    list = list.filter((b) => `${b.title} ${b.slug} ${b.category}`.toLowerCase().includes(q));
   }
-  markFetched();
-  return all;
+  const by = {
+    pot: (a, b) => Number(b.potUsd) - Number(a.potUsd),
+    deadline: (a, b) => new Date(a.deadline) - new Date(b.deadline),
+    entries: (a, b) => Number(b.submissionCount) - Number(a.submissionCount),
+  }[boardSort];
+  return [...list].sort(by);
 }
-
-export async function renderBoard(root) {
-  const list = root.querySelector("#board-list");
-  const count = root.querySelector("#board-count");
-  const q = root.querySelector("#q");
-  const statusSel = root.querySelector("#status");
-  const sortSel = root.querySelector("#sort");
-
-  let items = [];
+function card(b) {
+  const soon = closingSoon(b);
+  return `<article class="card${soon ? ' soon' : ''}">
+<a href="#/bounty/${esc(b.slug)}"><h2>${esc(b.title)}</h2></a>
+<p class="meta"><b class="pot">${money(b.potUsd)}</b> live pot · ${money(b.rewardAmount)} reward · ${b.submissionCount} ${plural(b.submissionCount, 'entry', 'entries')}</p>
+<p class="meta">${esc(b.category)} · fee ${money(b.entryFeeUsd)} · ${soon ? '<span class="soon-tag">⚡ closing soon · </span>' : ''}${timeLeft(b.deadline)} · ends ${date(b.deadline)}</p>
+</article>`;
+}
+function updateList() {
+  const list = document.getElementById('list');
+  if (!list) return;
+  const rows = shown();
+  list.innerHTML = rows.length ? rows.map(card).join('') : '<p class="mini">No bounties match.</p>';
+  const count = document.getElementById('count');
+  if (count) count.textContent = `${rows.length} of ${boardItems.length} bounties`;
+}
+async function boardPage(view) {
+  view.innerHTML = `<h1>Bounty board</h1>
+<p class="sub">Live from make.fun — every open bounty, its live pot and time left.</p>
+<div class="controls">
+<input id="q" type="search" placeholder="Search bounties…" aria-label="Search bounties" value="${esc(boardQ)}">
+<select id="f" aria-label="Status filter">
+<option value="all"${boardFilter === 'all' ? ' selected' : ''}>All</option>
+<option value="open"${boardFilter === 'open' ? ' selected' : ''}>Open</option>
+<option value="soon"${boardFilter === 'soon' ? ' selected' : ''}>Closing soon</option>
+<option value="ended"${boardFilter === 'ended' ? ' selected' : ''}>Ended</option>
+</select>
+<select id="s" aria-label="Sort">
+<option value="pot"${boardSort === 'pot' ? ' selected' : ''}>Pot: high to low</option>
+<option value="deadline"${boardSort === 'deadline' ? ' selected' : ''}>Deadline: soonest</option>
+<option value="entries"${boardSort === 'entries' ? ' selected' : ''}>Entries: most first</option>
+</select>
+</div>
+<p class="mini" id="count"></p>
+<div id="list"><p class="loading">Loading live bounties…</p></div>`;
+  const q = document.getElementById('q');
+  q.addEventListener('input', () => { boardQ = q.value; updateList(); });
+  document.getElementById('f').addEventListener('change', (e) => { boardFilter = e.target.value; updateList(); });
+  document.getElementById('s').addEventListener('change', (e) => { boardSort = e.target.value; updateList(); });
+  if (!boardItems.length) boardItems = (await getBounties()).items ?? [];
+  updateList();
+  q.focus();
+}
+function splitBars(rewardsNow) {
+  const top = (rewardsNow ?? []).slice(0, 3);
+  if (!top.length) return '';
+  const max = Math.max(...top.map((r) => Number(r.amountUsd)));
+  return `<div class="split">${top.map((r) => {
+    const w = Math.max(4, Math.round((Number(r.amountUsd) / max) * 100));
+    return `<div class="row"><b>${r.place === 1 ? '🥇 1st' : r.place === 2 ? '🥈 2nd' : '🥉 3rd'}</b><div class="bar"><i style="width:${w}%"></i></div><b class="num">${money(r.amountUsd)}</b></div>`;
+  }).join('')}</div>`;
+}
+function rewardsTable(rewardsNow) {
+  const rows = (rewardsNow ?? []).slice(0, 10);
+  if (!rows.length) return '';
+  return `<table><thead><tr><th>Place</th><th class="num">Base</th><th class="num">Fee share</th><th class="num">Total now</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.place}</td><td class="num">${money(r.baseUsd)}</td><td class="num">${money(r.feeShareUsd)}</td><td class="num"><b>${money(r.amountUsd)}</b></td></tr>`).join('')}</tbody></table>`;
+}
+async function bountyPage(view, slug) {
+  const b = await getBounty(slug);
+  const soon = closingSoon(b);
+  const escrow = b.escrowLifecycle ? `Prizes held in on-chain escrow · Solana ${esc(b.escrowLock?.cluster ?? 'mainnet')} · state: ${esc(b.escrowLifecycle.state)}` : 'Prizes held in on-chain escrow';
+  let preview = '';
   try {
-    items = await fetchBoard();
-  } catch (err) {
-    list.innerHTML = '<p class="error">Could not load the board: ' + escapeHtml(err.message) + "</p>";
-    return;
+    const lb = await getLeaderboard(slug);
+    const top = (lb.entries ?? []).slice(0, 10);
+    if (top.length) preview = `<h2>Top 10 right now</h2>${top.map((e) => `<p class="meta">#${e.rank} <b>${esc(e.handle)}</b> — ${winRate(e.values?.judge)} win rate · ${esc(e.title ?? '')}</p>`).join('')}<p><a href="#/leaderboard/${esc(slug)}">Full leaderboard →</a></p>`;
+  } catch { /* preview is a bonus; the bounty page stands without it */ }
+  view.innerHTML = `<h1>${esc(b.title)}</h1>
+<p class="sub">${esc(b.sponsor?.name ?? '')} · ${esc(b.category)} · ${(b.skills ?? []).map(esc).join(' · ')}</p>
+<div class="hero">
+<div class="pot">${money(b.potUsd)}</div>
+<p class="meta">live pot · ${money(b.rewardAmount)} base reward · ${b.submissionCount} ${plural(b.submissionCount, 'entry', 'entries')} · entry fee ${money(b.entryFeeUsd)}</p>
+<p class="meta">${soon ? '<span class="soon-tag">⚡ closing soon · </span>' : ''}${timeLeft(b.deadline)} · ends ${date(b.deadline)}</p>
+</div>
+<h2>Prize split — top 3</h2>
+${splitBars(b.rewardsNow)}
+<h2>Rewards</h2>
+${rewardsTable(b.rewardsNow)}
+<p>${esc(b.summary ?? '')}</p>
+<details><summary>Rules</summary><p>${esc(b.rules ?? 'See the bounty page on make.fun.').replace(/\n/g, '<br>')}</p></details>
+<p class="meta">Published ${date(b.publishedAt)} · Deadline ${date(b.deadline)} · ${esc(escrow)}</p>
+${preview}`;
+}
+async function leaderboardPage(view, slug) {
+  const lb = await getLeaderboard(slug);
+  const entries = lb.entries ?? [];
+  const comp = lb.competition ?? {};
+  const maxWin = Math.max(1, ...entries.map((e) => Number(e.values?.judge ?? 0)));
+  view.innerHTML = `<h1>${esc(comp.title ?? slug)} — leaderboard</h1>
+<p class="sub">${entries.length} ${plural(entries.length, 'entry', 'entries')} · ranked by judge win rate · tie-break: smaller dossier wins</p>
+<table><thead><tr><th>#</th><th>Entry</th><th>Win rate</th><th class="num">Dossier</th><th class="num">Build cost</th><th>Status</th></tr></thead><tbody>${entries.map((e) => {
+    const v = e.values ?? {};
+    const w = Math.max(2, Math.round((Number(v.judge ?? 0) / maxWin) * 100));
+    return `<tr${e.rank <= 3 ? ' class="top3"' : ''}>
+<td class="rank">#${e.rank}</td>
+<td><b>${esc(e.title ?? e.handle)}</b><br><span class="mini">@${esc(e.handle)}</span></td>
+<td><b>${winRate(v.judge)}</b> <span class="mini">${winRate(v.judge_low)}–${winRate(v.judge_high)}</span><div class="bar"><i style="width:${w}%"></i></div></td>
+<td class="num">${bytes(v.bytes)}</td>
+<td class="num">${e.cost ? cost(e.cost.micro_usd) : '—'}</td>
+<td>${esc(e.status ?? '')}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+async function profilePage(view, handle) {
+  const p = await getProfile(handle);
+  const initials = (p.handle ?? handle).slice(0, 2).toUpperCase();
+  const avatar = p.image ? `<img src="https://make.fun${esc(p.image)}" alt="">` : esc(initials);
+  const r = p.record ?? {};
+  const solutions = p.solutions ?? [];
+  view.innerHTML = `<div class="prof"><div class="avatar">${avatar}</div><div><h1>@${esc(p.handle ?? handle)}</h1><p class="sub">${esc(p.display_name ?? '')}${p.bio ? ` · ${esc(p.bio)}` : ''} · joined ${rel(p.joined_at)} (${date(p.joined_at)})</p></div></div>
+<div class="stats">
+<div class="stat"><b>${r.competitions_entered ?? 0}</b><span>entered</span></div>
+<div class="stat"><b>${r.competitions_placed ?? 0}</b><span>placed</span></div>
+<div class="stat"><b>${r.competitions_won ?? 0}</b><span>won</span></div>
+<div class="stat"><b>${money(r.prize_usd ?? 0)}</b><span>prize money</span></div>
+</div>
+<h2>Solutions (${solutions.length})</h2>
+${solutions.length ? solutions.map((s) => {
+    const c = s.competition ?? {};
+    return `<article class="card"><a href="#/bounty/${esc(c.slug ?? '')}"><h2>${esc(c.title ?? s.title ?? '')}</h2></a>
+<p class="meta">${esc(c.category ?? '')} · ${money(c.reward_usd ?? 0)} reward · ${c.status ?? ''} · entered ${rel(s.entered_at)}${s.placement ? ` · placed #${s.placement}` : ''}${s.prize_usd ? ` · won ${money(s.prize_usd)}` : ''}${s.score?.display && s.score.display !== 'n/a' ? ` · score ${esc(s.score.display)}` : ''}</p></article>`;
+  }).join('') : '<p class="mini">No solutions yet.</p>'}
+${p.wallet?.address ? `<p class="mini">Payout wallet: <a href="${esc(p.wallet.explorer_url ?? '')}">${esc(p.wallet.address.slice(0, 6))}…${esc(p.wallet.address.slice(-4))}</a></p>` : ''}`;
+}
+/** Route the hash, render, and mark the page ready for a screenshot. */
+export async function route(h, view, fresh) {
+  const parts = h.split('/').filter(Boolean);
+  try {
+    if (parts[0] === 'bounty' && parts[1]) {
+      document.title = 'Bounty | Lantern';
+      await bountyPage(view, decodeURIComponent(parts[1]));
+    } else if (parts[0] === 'leaderboard' && parts[1]) {
+      document.title = 'Leaderboard | Lantern';
+      await leaderboardPage(view, decodeURIComponent(parts[1]));
+    } else if (parts[0] === 'profile' && parts[1]) {
+      document.title = `@${parts[1]} | Lantern`;
+      await profilePage(view, decodeURIComponent(parts[1]));
+    } else {
+      document.title = 'Lantern — make.fun bounties';
+      await boardPage(view);
+    }
+  } catch (e) {
+    view.innerHTML = `<p class="err">Could not load live data (${esc(e.message)}). Check the connection and retry.</p>`;
   }
-
-  function apply() {
-    const needle = (q.value || "").trim().toLowerCase();
-    const status = statusSel.value;
-    const sort = sortSel.value;
-    let shown = items.filter((b) => {
-      if (status === "open" && !isOpen(b)) return false;
-      if (status === "closed" && isOpen(b)) return false;
-      if (!needle) return true;
-      const hay = [b.title, b.slug, b.category, b.sponsor && b.sponsor.name, b.summary].join(" ").toLowerCase();
-      return hay.includes(needle);
-    });
-    if (sort === "pot") shown.sort((a, b) => potOf(b) - potOf(a));
-    else if (sort === "deadline") shown.sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
-    else shown.sort((a, b) => (b.submissionCount || 0) - (a.submissionCount || 0));
-    count.textContent = shown.length + " of " + items.length + " bounties";
-    list.innerHTML = shown.length
-      ? shown.map(bountyCard).join("")
-      : '<p class="muted">No bounties match. Clear the search or change the filter.</p>';
-  }
-
-  q.addEventListener("input", apply);
-  statusSel.addEventListener("change", apply);
-  sortSel.addEventListener("change", apply);
-  apply();
-}
-
-function paragraphs(text) {
-  return String(text || "")
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .map((p) => "<p>" + escapeHtml(p).replace(/\n/g, "<br>") + "</p>")
-    .join("");
-}
-
-export async function renderBounty(root, slug) {
-  const [{ data: b }, lb] = await Promise.all([
-    apiGet(bountyUrl(slug)),
-    apiGet(leaderboardUrl(slug)).catch(() => null),
-  ]);
-  markFetched();
-  const open = isOpen(b);
-  const rewards = Array.isArray(b.rewardsNow) && b.rewardsNow.length ? b.rewardsNow : b.rewards;
-  const rows = (rewards || []).map((r) => {
-    const place = r.place ?? r.position ?? "?";
-    const amount = r.amountUsd ?? r.amount_usd ?? r.baseUsd;
-    return (
-      "<tr><td>" + escapeHtml(String(place)) + "</td>" +
-      "<td class=\"num\">" + moneyUsd(amount) + "</td>" +
-      (r.feeShareUsd ? "<td class=\"num\">+" + moneyUsd(r.feeShareUsd) + " fees</td>" : "<td></td>") +
-      "<td>" + escapeHtml(r.title || "") + "</td></tr>"
-    );
-  }).join("");
-
-  const top = lb && Array.isArray(lb.data.entries) ? lb.data.entries.slice(0, 10) : [];
-  const preview = top.map((e) =>
-    "<tr><td>" + escapeHtml(String(e.rank)) + "</td>" +
-    "<td>" + escapeHtml(e.title || "") + "</td>" +
-    '<td><a href="#/profile/' + encodeURIComponent(e.handle) + '">' + escapeHtml(e.handle) + "</a></td>" +
-    "<td class=\"num\">" + winRate(e.values && e.values.judge) + "</td></tr>"
-  ).join("");
-
-  root.innerHTML =
-    '<p><a href="#/">← Board</a></p>' +
-    "<h1>" + escapeHtml(b.title) + "</h1>" +
-    '<p class="row"><span class="pill ' + (open ? "open" : "closed") + '">' + (open ? "Open" : "Closed") + "</span>" +
-    "<span>" + escapeHtml(b.category || "") + "</span>" +
-    "<span>" + escapeHtml(b.sponsor && b.sponsor.name ? "by " + b.sponsor.name : "") + "</span></p>" +
-    '<div class="card"><div class="row"><span class="pot">Live pot: ' + moneyUsd(potOf(b)) + "</span>" +
-    "<span>Entry fee: " + escapeHtml(feeOf(b)) + "</span>" +
-    "<span>" + escapeHtml(timeLeft(b.deadline)) + "</span>" +
-    "<span>" + countLabel(b.submissionCount || 0, "entry", "entries") + "</span></div>" +
-    "<p class=\"small muted\">Escrow: every $0.50 entry fee paid joins the pot" +
-    (b.entryFeesUsd ? " — " + moneyUsd(b.entryFeesUsd) + " in fees from " + (b.entryFeePayers || 0) + " payers so far." : ".") +
-    "</p></div>" +
-    (b.summary ? "<p>" + escapeHtml(b.summary) + "</p>" : "") +
-    "<h2>Rewards</h2>" +
-    (rows
-      ? '<table><thead><tr><th>Place</th><th class="num">Prize</th><th class="num">Fee share</th><th>Title</th></tr></thead><tbody>' + rows + "</tbody></table>"
-      : '<p class="muted">No rewards table published yet.</p>') +
-    '<p class="small"><a href="#/leaderboard/' + encodeURIComponent(slug) + '">Full leaderboard →</a></p>' +
-    "<h2>Dates</h2>" +
-    "<p>Deadline: " + escapeHtml(dateShort(b.deadline)) + " (" + escapeHtml(timeLeft(b.deadline)) + ")<br>" +
-    "Published: " + escapeHtml(dateShort(b.publishedAt)) +
-    (b.opensAt ? "<br>Opens: " + escapeHtml(dateShort(b.opensAt)) : "") + "</p>" +
-    (b.rules
-      ? "<details><summary>Rules</summary><pre class=\"rules\">" + escapeHtml(typeof b.rules === "string" ? b.rules : JSON.stringify(b.rules, null, 2)) + "</pre></details>"
-      : "") +
-    "<h2>Description</h2>" +
-    (paragraphs(b.description) || '<p class="muted">No description.</p>') +
-    (preview
-      ? "<h2>Top 10 so far</h2><table><thead><tr><th>#</th><th>Entry</th><th>Entrant</th><th class=\"num\">Win rate</th></tr></thead><tbody>" + preview + "</tbody></table>"
-      : "");
-}
-
-export async function renderLeaderboard(root, slug) {
-  const [{ data: comp }, { data: lb }] = await Promise.all([
-    apiGet(bountyUrl(slug)),
-    apiGet(leaderboardUrl(slug)),
-  ]);
-  markFetched();
-  const entries = Array.isArray(lb.entries) ? lb.entries : [];
-  const rows = entries.map((e) => {
-    const v = e.values || {};
-    const cost = e.cost && e.cost.micro_usd;
-    return (
-      "<tr><td>" + escapeHtml(String(e.rank)) + "</td>" +
-      "<td>" + escapeHtml(e.title || "") + "</td>" +
-      '<td><a href="#/profile/' + encodeURIComponent(e.handle) + '">' + escapeHtml(e.handle) + "</a></td>" +
-      '<td class="num">' + winRate(v.judge) +
-      '<br><span class="muted small">' + winInterval(e.interval && e.interval.low, e.interval && e.interval.high) + "</span></td>" +
-      '<td class="num">' + bytes(v.bytes) + "</td>" +
-      '<td class="num">' + buildCost(cost) + "</td>" +
-      "<td>" + escapeHtml(e.status || "") + "</td></tr>"
-    );
-  }).join("");
-
-  root.innerHTML =
-    '<p><a href="#/bounty/' + encodeURIComponent(slug) + '">← Bounty</a></p>' +
-    "<h1>Leaderboard</h1>" +
-    '<p class="muted">' + escapeHtml(comp.title || slug) + " · " + entries.length + " ranked entries · judge win rate with 90% interval</p>" +
-    (rows
-      ? '<table><thead><tr><th>#</th><th>Entry</th><th>Entrant</th><th class="num">Win rate</th><th class="num">Dossier</th><th class="num">Build cost</th><th>Status</th></tr></thead><tbody>' + rows + "</tbody></table>"
-      : '<p class="muted">No leaderboard entries yet.</p>');
-}
-
-function initials(handle) {
-  return (handle || "?").slice(0, 2).toUpperCase();
-}
-
-export async function renderProfile(root, handle) {
-  const { data: p } = await apiGet(profileUrl(handle));
-  markFetched();
-  const rec = p.record || {};
-  const sols = Array.isArray(p.solutions) ? p.solutions : [];
-  const img = p.image || p.avatar || null;
-
-  const cards = sols.map((s) => {
-    const c = s.competition || {};
-    return (
-      '<article class="card"><h3><a href="#/bounty/' + encodeURIComponent(c.slug || "") + '">' + escapeHtml(c.title || s.title || "") + "</a></h3>" +
-      "<p class=\"small muted\">" + escapeHtml(s.title || "") +
-      (s.placement ? " · placed #" + escapeHtml(String(s.placement)) : "") +
-      (s.prize_usd ? " · won " + moneyUsd(s.prize_usd) : "") +
-      (s.entered_at ? " · entered " + escapeHtml(relativeTime(s.entered_at)) : "") +
-      "</p></article>"
-    );
-  }).join("");
-
-  root.innerHTML =
-    '<div class="profile-head"><span class="avatar" id="avatar">' + escapeHtml(initials(p.handle)) + "</span>" +
-    "<div><h1>@" + escapeHtml(p.handle) + "</h1>" +
-    (p.display_name ? "<p>" + escapeHtml(p.display_name) + "</p>" : "") +
-    (p.bio ? "<p>" + escapeHtml(p.bio) + "</p>" : "") +
-    '<p class="muted small">Joined ' + escapeHtml(dateShort(p.joined_at)) +
-    (p.github_login ? " · GitHub @" + escapeHtml(p.github_login) : "") + "</p></div></div>" +
-    '<div class="stat-grid">' +
-    '<span class="stat"><b>' + escapeHtml(String(rec.competitions_entered ?? 0)) + "</b><span>entered</span></span>" +
-    '<span class="stat"><b>' + escapeHtml(String(rec.competitions_won ?? 0)) + "</b><span>won</span></span>" +
-    '<span class="stat"><b>' + escapeHtml(String(rec.competitions_placed ?? 0)) + "</b><span>placed</span></span>" +
-    '<span class="stat"><b>' + moneyUsd(rec.prize_usd ?? 0) + "</b><span>prizes</span></span>" +
-    "</div>" +
-    "<h2>Solutions (" + sols.length + ")</h2>" +
-    (cards || '<p class="muted">No public solutions yet.</p>');
-
-  if (img) {
-    const el = document.createElement("img");
-    el.crossOrigin = "anonymous";
-    el.alt = "@" + p.handle + " avatar";
-    el.src = img.startsWith("http") ? img : "https://make.fun" + img;
-    el.addEventListener("error", () => el.remove());
-    document.getElementById("avatar").appendChild(el);
-  }
+  if (fresh) fresh.textContent = `Data: make.fun public API · fetched ${new Date().toLocaleTimeString()}`;
+  window.__shotReady = true;
 }

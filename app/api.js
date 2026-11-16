@@ -1,70 +1,30 @@
-// Read-only fetch wrapper for make.fun's public API.
-// In-memory cache with a 60 s soft TTL, ETag revalidation and single-flight
-// dedup so a view re-render never fires a duplicate request.
-
-const API = "https://make.fun/api";
-const SOFT_TTL_MS = 60 * 1000;
-
-const cache = new Map(); // path -> { at, etag, data }
-const inflight = new Map(); // path -> Promise
-
-function now() {
-  return Date.now();
-}
-
-export function apiUrl(path) {
-  return API + path;
-}
-
-export async function apiGet(path) {
-  const entry = cache.get(path);
-  if (entry && now() - entry.at < SOFT_TTL_MS) return { data: entry.data, fresh: true, fromCache: true };
-  if (inflight.has(path)) return inflight.get(path);
-
-  const job = (async () => {
+// make.fun public API, read-only: in-memory cache (60 s soft TTL), ETag
+// revalidation with If-None-Match (304 keeps the cached body), single-flight dedup.
+const API = 'https://make.fun/api';
+const cache = new Map();
+const inflight = new Map();
+async function get(path) {
+  const url = API + path;
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < 60000) return hit.data;
+  if (inflight.has(url)) return inflight.get(url);
+  const p = (async () => {
     const headers = {};
-    if (entry && entry.etag) headers["If-None-Match"] = entry.etag;
-    const res = await fetch(API + path, { headers });
-    if (res.status === 304 && entry) {
-      entry.at = now();
-      return { data: entry.data, fresh: false, fromCache: true };
-    }
-    if (!res.ok) throw new Error("make.fun API " + res.status + " for " + path);
+    if (hit && hit.etag) headers['If-None-Match'] = hit.etag;
+    const res = await fetch(url, { headers });
+    if (res.status === 304 && hit) { hit.at = Date.now(); return hit.data; }
     const data = await res.json();
-    const etag = res.headers.get("ETag");
-    cache.set(path, { at: now(), etag: etag || null, data });
-    return { data, fresh: true, fromCache: false };
+    cache.set(url, { at: Date.now(), etag: res.headers.get('ETag'), data });
+    return data;
   })();
-
-  inflight.set(path, job);
-  try {
-    return await job;
-  } finally {
-    inflight.delete(path);
-  }
+  inflight.set(url, p);
+  try { return await p; } finally { inflight.delete(url); }
 }
-
-export function boardUrl() {
-  return "/competitions";
-}
-
-export function bountyUrl(slug) {
-  return "/competitions/" + encodeURIComponent(slug);
-}
-
-export function leaderboardUrl(slug) {
-  return "/competitions/" + encodeURIComponent(slug) + "/leaderboard";
-}
-
-export function profileUrl(handle) {
-  return "/profiles/" + encodeURIComponent(handle);
-}
-
-// Last time any API answer arrived, for the footer's freshness line.
-let lastFetchAt = 0;
-export function markFetched() {
-  lastFetchAt = now();
-}
-export function lastFetchedAt() {
-  return lastFetchAt;
-}
+/** The open bounties: { items: [...] }. */
+export const getBounties = () => get('/competitions?status=open&activity=times');
+/** One bounty, by slug. */
+export const getBounty = (slug) => get(`/competitions/${encodeURIComponent(slug)}`);
+/** A bounty's leaderboard: { entries: [...] }. */
+export const getLeaderboard = (slug) => get(`/competitions/${encodeURIComponent(slug)}/leaderboard`);
+/** A public profile, by handle. */
+export const getProfile = (handle) => get(`/profiles/${encodeURIComponent(handle)}`);
